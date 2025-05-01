@@ -3,8 +3,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras.optimizers import Adam
-import os
+import os, sys
 
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 # Import data preprocessing and model wrapper
 from src.data_preprocessing import load_and_preprocess_data
 from src.models import AutoencoderModel
