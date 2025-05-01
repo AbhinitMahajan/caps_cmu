@@ -1,6 +1,13 @@
 # src/training.py
 
 import numpy as np
+try:
+    from IPython import get_ipython
+    ip = get_ipython()
+    if ip is not None:
+        ip.run_line_magic('matplotlib', 'inline')
+except Exception:
+    pass
 import matplotlib.pyplot as plt
 from tensorflow.keras.optimizers import Adam
 import os, sys
