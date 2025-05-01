@@ -16,6 +16,7 @@ def load_and_preprocess_data(filename="Spectra_Abhin_reduced.csv"):
     
     # Optionally, save the normalized data
     processed_file = os.path.join(DATA_PROCESSED_DIR, 'normalized_acsm_data.csv')
+    os.makedirs(os.path.dirname(processed_file), exist_ok=True)
     acsm_scaled_df.to_csv(processed_file, index=False)
     print(f'Normalization complete. Data saved as {processed_file}')
     return acsm_scaled_df
