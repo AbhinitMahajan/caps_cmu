@@ -15,11 +15,22 @@ import os, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+# CRITICAL: Import and apply seed configuration FIRST
+from src import config
+# Ensure the config module's seed settings are applied
+import random
+import tensorflow as tf
+os.environ['PYTHONHASHSEED'] = str(config.SEED_VALUE)
+random.seed(config.SEED_VALUE)
+np.random.seed(config.SEED_VALUE)
+tf.random.set_seed(config.SEED_VALUE)
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
+
 # Import data preprocessing and model wrapper
 from src.data_preprocessing import load_and_preprocess_data
 from src.models import AutoencoderModel
 from src.data_preprocessing import prepare_data
-from src import config
 from src.visualisation import plot_training_history
 
 
@@ -36,6 +47,22 @@ def get_input(prompt, cast_type, default):
     except ValueError:
         print(f"Invalid input. Using default: {default}")
         return default
+
+
+def ensure_reproducibility():
+    """
+    Re-apply all seed settings to ensure reproducibility.
+    Call this before model creation and training.
+    """
+    print("Ensuring reproducibility with seed:", config.SEED_VALUE)
+    os.environ['PYTHONHASHSEED'] = str(config.SEED_VALUE)
+    random.seed(config.SEED_VALUE)
+    np.random.seed(config.SEED_VALUE)
+    tf.random.set_seed(config.SEED_VALUE)
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+    
+    # Additional TensorFlow determinism settings
+    tf.config.experimental.enable_op_determinism()
 
 
 def main():
@@ -58,6 +85,20 @@ def main():
     X_input, X_target = prepare_data(df)
     input_dim = X_input.shape[1]  # e.g. 43 features
     print(f"For reference Input shape: {X_input.shape}")  # (num_samples, 43, 1)
+    
+    # Create deterministic train/validation split to ensure reproducibility
+    n_samples = X_input.shape[0]
+    split_idx = int(0.75 * n_samples)  # 75% train, 25% validation
+    
+    X_train = X_input[:split_idx]
+    X_val = X_input[split_idx:]
+    y_train = X_target[:split_idx] 
+    y_val = X_target[split_idx:]
+    
+    print(f"Train samples: {X_train.shape[0]}, Validation samples: {X_val.shape[0]}")
+
+    # ---------------- Ensure Reproducibility Before Model Creation ----------------
+    ensure_reproducibility()
 
     # ---------------- Build and Compile Model ----------------
     ae_model = AutoencoderModel(
@@ -69,8 +110,11 @@ def main():
         linear_l2=linear_l2
     )
 
+    # Create optimizer with deterministic behavior
+    optimizer = Adam(learning_rate=learning_rate)
+    
     ae_model.compile(
-        optimizer=Adam(learning_rate=learning_rate),
+        optimizer=optimizer,
         loss={"deep_output": "mse", "linear_output": "mse"},
         loss_weights={"deep_output": 1.0, "linear_output": 0.0}
     )
@@ -106,11 +150,12 @@ def main():
     print("Manual forward pass succeeded.")
 
     history = ae_model.fit(
-        X_input,
-        {"deep_output": X_target, "linear_output": X_target},
+        X_train,
+        {"deep_output": y_train, "linear_output": y_train},
         epochs=epochs,
         batch_size=batch_size,
-        validation_split=0.25
+        validation_data=(X_val, {"deep_output": y_val, "linear_output": y_val}),
+        shuffle=False  # Disable shuffling for reproducibility
     )
     
     # ---------------- Plot Training History ----------------
