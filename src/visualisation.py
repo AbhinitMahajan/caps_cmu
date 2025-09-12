@@ -129,6 +129,110 @@ def load_and_plot_linear_weights(
             plot_bar_chart_for_factor(weights[i], feature_names, label)
 
 
+def plot_comparison(nmf_df, ae_df, title_suffix=""):
+    """
+    Plot correlation matrix and scatter grid comparing NMF and AE factor profiles.
+    
+    Parameters
+    ----------
+    nmf_df : pd.DataFrame
+        NMF factor profiles (rows=factors, cols=m/z features)
+    ae_df : pd.DataFrame  
+        AE factor profiles (rows=factors, cols=m/z features)
+    title_suffix : str
+        Additional text for plot titles
+    """
+    n_factors = min(len(nmf_df), len(ae_df))
+    
+    # Correlation matrix between all factor pairs
+    corr_matrix = np.zeros((n_factors, n_factors))
+    for i in range(n_factors):
+        for j in range(n_factors):
+            corr_matrix[i, j] = np.corrcoef(nmf_df.iloc[i], ae_df.iloc[j])[0, 1]
+    
+    # Plot correlation matrix
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(corr_matrix, annot=True, fmt='.3f', cmap='RdBu_r', center=0,
+                xticklabels=[f'AE_F{i+1}' for i in range(n_factors)],
+                yticklabels=[f'NMF_F{i+1}' for i in range(n_factors)])
+    plt.title(f'Factor Correlation Matrix{title_suffix}')
+    plt.xlabel('Autoencoder Factors')
+    plt.ylabel('NMF Factors')
+    plt.tight_layout()
+    plt.show()
+    
+    # Scatter grid comparing factor profiles
+    fig, axes = plt.subplots(n_factors, n_factors, figsize=(12, 12))
+    if n_factors == 1:
+        axes = np.array([[axes]])
+    elif n_factors == 2:
+        axes = axes.reshape(2, 2)
+        
+    for i in range(n_factors):
+        for j in range(n_factors):
+            ax = axes[i, j]
+            ax.scatter(nmf_df.iloc[i], ae_df.iloc[j], alpha=0.6, s=20)
+            ax.set_xlabel(f'NMF Factor {i+1}')
+            ax.set_ylabel(f'AE Factor {j+1}')
+            ax.set_title(f'r={corr_matrix[i,j]:.3f}')
+            
+            # Add diagonal line
+            min_val = min(ax.get_xlim()[0], ax.get_ylim()[0])
+            max_val = max(ax.get_xlim()[1], ax.get_ylim()[1])
+            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5)
+    
+    plt.suptitle(f'Factor Profile Scatter Grid{title_suffix}')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_difference_and_ratio(nmf_df_norm, ae_df_norm, nmf_factor, ae_factor):
+    """
+    Plot difference and ratio between selected NMF and AE factors.
+    
+    Parameters
+    ---------- 
+    nmf_df_norm : pd.DataFrame
+        Row-normalized NMF factor profiles
+    ae_df_norm : pd.DataFrame
+        Row-normalized AE factor profiles  
+    nmf_factor : str
+        Name of NMF factor to compare (e.g., "NMF_Factor1")
+    ae_factor : str
+        Name of AE factor to compare (e.g., "AE_Factor1")
+    """
+    # Extract factor data
+    species = nmf_df_norm.columns
+    nmf_values = nmf_df_norm.loc[nmf_factor].values
+    ae_values = ae_df_norm.loc[ae_factor].values
+    
+    # Calculate difference and ratio
+    difference = nmf_values - ae_values
+    ratio = np.where(ae_values > 1e-12, nmf_values / ae_values, np.nan)
+    
+    # Plot difference
+    plt.figure(figsize=(12, 4))
+    plt.bar(species, difference, color='skyblue', alpha=0.8)
+    plt.axhline(0, color='black', linewidth=1)
+    plt.title(f"Difference: {nmf_factor} - {ae_factor}")
+    plt.xlabel("m/z Species")
+    plt.ylabel("Difference (NMF - AE)")
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot ratio
+    plt.figure(figsize=(12, 4))
+    plt.bar(species, ratio, color='salmon', alpha=0.8)
+    plt.axhline(1, color='black', linewidth=1, linestyle='--')
+    plt.title(f"Ratio: {nmf_factor} / {ae_factor}")
+    plt.xlabel("m/z Species") 
+    plt.ylabel("Ratio (NMF ÷ AE)")
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(
