@@ -215,8 +215,7 @@ def main():
     real_latent_vectors = encoder.predict(X_train, verbose=0)
     print(f"Real latent vectors shape: {real_latent_vectors.shape}")
     
-    # Find representative samples for each factor
-    # Method 1: Use samples with highest activation for each factor
+    # Find representative samples for each factor (representative-sample method only)
     n_factors = n_clusters
     factor_profiles = []
     
@@ -255,8 +254,8 @@ def main():
         enhanced_factor_profile = probabilistic_layer(enhanced_latent.reshape(1, -1)).numpy()
         enhanced_factor_profiles.append(enhanced_factor_profile[0])
     
-    # Use the enhanced method as the primary approach
-    factor_profiles = np.array(enhanced_factor_profiles)
+    # so using the representative-sample method rather than the enhanced method
+    factor_profiles = np.array(factor_profiles)
     
     # Save probabilistic factor profiles (these are the interpretable ones)
     factors_save_path = os.path.join(model_dir, "probabilistic_factors.npy")
