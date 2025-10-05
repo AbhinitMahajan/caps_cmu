@@ -83,6 +83,55 @@ class CorrelationLossLayer(layers.Layer):
         return deep_out
 
 
+class PMFKLLossLayer(layers.Layer):
+    """
+    Adds a PMF-style reconstruction KL loss:
+    - Profiles P are the softmax over species of the rows of factor logits
+    - Contributions a_i are the softmax over factors of the latent vector
+    - Reconstruction y_hat_i = a_i @ P
+    - Target y_i is the per-sample L1-normalized input spectrum
+
+    Also adds an orthogonality penalty on P via off-diagonal energy of P @ P^T.
+    """
+    def __init__(self, prob_layer, ortho_weight=1e-3, eps=1e-8, **kwargs):
+        super().__init__(**kwargs)
+        self.prob_layer = prob_layer  # instance of ProbabilisticFactorLayer
+        self.ortho_weight = ortho_weight
+        self.eps = eps
+
+    def call(self, inputs):
+        model_input, latent = inputs  # model_input shape (batch, F, 1); latent (batch, K)
+
+        # Normalize true spectra per sample (L1)
+        x_true = tf.squeeze(model_input, axis=-1)  # (batch, F)
+        x_sum = tf.reduce_sum(x_true, axis=1, keepdims=True)
+        y_true = x_true / (x_sum + self.eps)
+
+        # Global factor profiles from logits: P (K, F)
+        logits = self.prob_layer.factor_logits.kernel  # (K, F)
+        temperature = tf.convert_to_tensor(self.prob_layer.temperature, dtype=logits.dtype)
+        P = tf.nn.softmax(logits / temperature, axis=-1)
+
+        # Per-sample contributions from latent: a (batch, K)
+        a = tf.nn.softmax(latent, axis=-1)
+
+        # Reconstruction y_hat = a @ P
+        y_hat = tf.matmul(a, P)
+
+        # KL(y_true || y_hat)
+        kl = tf.reduce_sum(y_true * (tf.math.log(y_true + self.eps) - tf.math.log(y_hat + self.eps)), axis=1)
+        kl_loss = tf.reduce_mean(kl)
+
+        # Orthogonality penalty on P
+        gram = tf.matmul(P, P, transpose_b=True)  # (K, K)
+        diag = tf.linalg.diag_part(gram)
+        gram_off = gram - tf.linalg.diag(diag)
+        ortho_loss = tf.reduce_mean(tf.square(gram_off))
+
+        self.add_loss(kl_loss + self.ortho_weight * ortho_loss)
+        return latent  # pass-through
+
+
 class ProbabilisticFactorLayer(layers.Layer):
     """
     Creates interpretable probabilistic factor profiles using softmax normalization.
@@ -203,11 +252,15 @@ def build_autoencoder(
 
     # Probabilistic factor decoder branch
     # This replaces the raw linear branch with interpretable probabilistic factors
-    lin_out = ProbabilisticFactorLayer(
+    prob_layer = ProbabilisticFactorLayer(
         n_features=input_dim,
         temperature=temperature,
         name='probabilistic_factors'
-    )(latent)
+    )
+    lin_out = prob_layer(latent)
+
+    # PMF-style KL reconstruction loss and orthogonality regularization
+    _ = PMFKLLossLayer(prob_layer=prob_layer, ortho_weight=1e-3, name='pmf_kl')([inp, latent])
 
     # Attach loss layers
     d_named = IdentityLayer(name='deep_named')(deep_out)
@@ -261,6 +314,7 @@ class AutoencoderModel:
         custom_objs = {
             'ConsistencyLossLayer': ConsistencyLossLayer,
             'CorrelationLossLayer': CorrelationLossLayer,
+            'PMFKLLossLayer': PMFKLLossLayer,
             'ProbabilisticFactorLayer': ProbabilisticFactorLayer,
             'MeanSquaredError': MeanSquaredError
         }
