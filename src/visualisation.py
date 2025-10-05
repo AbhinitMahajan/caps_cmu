@@ -48,7 +48,7 @@ def plot_training_history(history):
     plt.show()
 
 
-def plot_weight_heatmap(weight_matrix, feature_names, factor_labels, figsize=(12, 6), cmap="viridis"):
+def plot_weight_heatmap(weight_matrix, feature_names, factor_labels, figsize=(12, 6), cmap="viridis", title="Factor Profiles Heatmap"):
     """
     Plots a heatmap of the weight matrix.
     """
@@ -56,14 +56,14 @@ def plot_weight_heatmap(weight_matrix, feature_names, factor_labels, figsize=(12
     sns.heatmap(
         weight_matrix,
         annot=True,
-        fmt=".2f",
+        fmt=".3f",
         cmap=cmap,
         xticklabels=feature_names,
         yticklabels=factor_labels
     )
-    plt.xlabel("Features")
+    plt.xlabel("m/z Species")
     plt.ylabel("Factors")
-    plt.title("Linear Decoder Weights Heatmap")
+    plt.title(title)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.show()
@@ -76,9 +76,16 @@ def plot_bar_chart_for_factor(factor_values, feature_names, factor_label, figsiz
     plt.figure(figsize=figsize)
     plt.bar(feature_names, factor_values, color=color)
     plt.xticks(rotation=90, ha='right')
-    plt.xlabel("Features")
-    plt.ylabel("Weight")
+    plt.xlabel("m/z Species")
+    plt.ylabel("Probability/Contribution")
     plt.title(f"{factor_label} Contribution Profile")
+    
+    # Add sum annotation for probabilistic factors
+    factor_sum = np.sum(factor_values)
+    if abs(factor_sum - 1.0) < 0.01:  # If it's a probabilistic factor (sums to ~1.0)
+        plt.text(0.02, 0.98, f"Sum: {factor_sum:.3f}", transform=plt.gca().transAxes, 
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
     plt.tight_layout()
     plt.show()
 
@@ -106,7 +113,8 @@ def load_and_plot_linear_weights(
     """
     # Load data
     df = pd.read_csv(data_csv)
-    feature_names = df.columns.tolist()
+    # Exclude 'Time' column to get only m/z features
+    feature_names = [col for col in df.columns.tolist() if col != 'Time']
 
     # Load weights
     weights = np.load(weights_path)
@@ -114,7 +122,7 @@ def load_and_plot_linear_weights(
     n_factors, n_features = weights.shape
     if n_features != len(feature_names):
         raise ValueError(
-            f"Mismatch: weights have {n_features} features but CSV has {len(feature_names)} columns"
+            f"Mismatch: weights have {n_features} features but CSV has {len(feature_names)} m/z columns (excluding Time)"
         )
 
     factor_labels = [f"Factor_{i+1}" for i in range(n_factors)]
@@ -127,6 +135,84 @@ def load_and_plot_linear_weights(
     if plot_bars:
         for i, label in enumerate(factor_labels):
             plot_bar_chart_for_factor(weights[i], feature_names, label)
+
+
+def load_and_plot_probabilistic_factors(
+    factors_path,
+    data_csv,
+    plot_heatmap=True,
+    plot_bars=True,
+    plot_statistics=True
+):
+    """
+    Loads probabilistic factor profiles and input feature names, then plots heatmap
+    and/or individual factor bar charts with interpretability statistics.
+
+    Parameters
+    ----------
+    factors_path : str
+        Path to the numpy .npy file containing probabilistic factors (shape: n_factors x n_features).
+    data_csv : str
+        Path to the raw input CSV file. Column names will be used as feature names.
+    plot_heatmap : bool, optional
+        Whether to render the heatmap. Default True.
+    plot_bars : bool, optional
+        Whether to render the bar charts. Default True.
+    plot_statistics : bool, optional
+        Whether to print factor interpretability statistics. Default True.
+    """
+    # Load data
+    df = pd.read_csv(data_csv)
+    # Exclude 'Time' column to get only m/z features
+    feature_names = [col for col in df.columns.tolist() if col != 'Time']
+
+    # Load probabilistic factors
+    factors = np.load(factors_path)
+    # factors shape: (n_factors, n_features)
+    n_factors, n_features = factors.shape
+    if n_features != len(feature_names):
+        raise ValueError(
+            f"Mismatch: factors have {n_features} features but CSV has {len(feature_names)} m/z columns (excluding Time)"
+        )
+
+    factor_labels = [f"Factor_{i+1}" for i in range(n_factors)]
+
+    # Print interpretability statistics
+    if plot_statistics:
+        print("=" * 60)
+        print("PROBABILISTIC FACTOR PROFILE STATISTICS")
+        print("=" * 60)
+        
+        for i, label in enumerate(factor_labels):
+            factor_sum = np.sum(factors[i])
+            factor_entropy = -np.sum(factors[i] * np.log(factors[i] + 1e-8))
+            max_entropy = np.log(n_features)
+            concentration = 1.0 - (factor_entropy / max_entropy)
+            dominant_species_idx = np.argmax(factors[i])
+            dominant_species = feature_names[dominant_species_idx]
+            dominant_contribution = factors[i][dominant_species_idx]
+            
+            print(f"\n{label}:")
+            print(f"  Sum: {factor_sum:.6f} (should be ~1.0)")
+            print(f"  Concentration: {concentration:.3f} (0=uniform, 1=focused)")
+            print(f"  Dominant species: {dominant_species} ({dominant_contribution:.3f})")
+            print(f"  Min contribution: {np.min(factors[i]):.6f}")
+            print(f"  Max contribution: {np.max(factors[i]):.6f}")
+        
+        print(f"\nOverall Statistics:")
+        print(f"  All factors sum to 1.0: {np.allclose(np.sum(factors, axis=1), 1.0)}")
+        print(f"  Average concentration: {np.mean([1.0 - (-np.sum(factors[i] * np.log(factors[i] + 1e-8)) / np.log(n_features)) for i in range(n_factors)]):.3f}")
+        print("=" * 60)
+
+    # Plot heatmap
+    if plot_heatmap:
+        plot_weight_heatmap(factors, feature_names, factor_labels, 
+                          title="Probabilistic Factor Profiles Heatmap")
+
+    # Plot bar chart per factor
+    if plot_bars:
+        for i, label in enumerate(factor_labels):
+            plot_bar_chart_for_factor(factors[i], feature_names, label)
 
 
 def plot_comparison(nmf_df, ae_df, title_suffix=""):

@@ -83,6 +83,51 @@ class CorrelationLossLayer(layers.Layer):
         return deep_out
 
 
+class ProbabilisticFactorLayer(layers.Layer):
+    """
+    Creates interpretable probabilistic factor profiles using softmax normalization.
+    Each factor profile sums to 1.0, providing clear probabilistic interpretation
+    similar to PMF methodology.
+    
+    This layer transforms raw latent representations into probability distributions
+    over chemical species (m/z features), making the factors interpretable and
+    directly comparable to PMF results.
+    """
+    def __init__(self, n_features, temperature=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.n_features = n_features
+        self.temperature = temperature
+        
+    def build(self, input_shape):
+        # Create the dense layer that maps from latent space to logits
+        self.factor_logits = layers.Dense(
+            self.n_features,
+            activation='linear',
+            name='factor_logits',
+            kernel_initializer='glorot_uniform'
+        )
+        super().build(input_shape)
+        
+    def call(self, latent_vectors):
+        # Get raw logits from latent space
+        logits = self.factor_logits(latent_vectors)
+        
+        # Apply temperature-scaled softmax for controllable sharpness
+        # Lower temperature = sharper distributions (more focused factors)
+        # Higher temperature = smoother distributions (more diffuse factors)
+        factor_profiles = tf.nn.softmax(logits / self.temperature, axis=-1)
+        
+        return factor_profiles
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'n_features': self.n_features,
+            'temperature': self.temperature
+        })
+        return config
+
+
 # ============================================================================
 # Model Building Functions
 # ============================================================================
@@ -93,7 +138,8 @@ def build_autoencoder(
     lambda1=0.5,
     lambda2=0.6,
     linear_l1=1e-5,
-    linear_l2=1e-3
+    linear_l2=1e-3,
+    temperature=1.0
 ):
     inp = layers.Input(shape=(input_dim, 1), name='AE_Input')
     x = inp
@@ -155,13 +201,12 @@ def build_autoencoder(
     deep_conv = layers.Conv1D(1, 3, padding='same', name='conv_deep')(z)
     deep_out = layers.Flatten(name='deep_flat')(deep_conv)
 
-    # Linear decoder branch
-    lin_out = layers.Dense(
-        input_dim,
-        activation='linear',
-        kernel_constraint=constraints.NonNeg(),
-        kernel_regularizer=regularizers.l1_l2(l1=linear_l1, l2=linear_l2),
-        name='linear_output'
+    # Probabilistic factor decoder branch
+    # This replaces the raw linear branch with interpretable probabilistic factors
+    lin_out = ProbabilisticFactorLayer(
+        n_features=input_dim,
+        temperature=temperature,
+        name='probabilistic_factors'
     )(latent)
 
     # Attach loss layers
@@ -190,12 +235,13 @@ class AutoencoderModel:
         lambda1,
         lambda2,
         linear_l1=1e-5,
-        linear_l2=1e-3
+        linear_l2=1e-3,
+        temperature=1.0
     ):
         input_dim = input_shape[0]
         self.model = build_autoencoder(
             n_clusters, input_dim, lambda1=lambda1, lambda2=lambda2,
-            linear_l1=linear_l1, linear_l2=linear_l2
+            linear_l1=linear_l1, linear_l2=linear_l2, temperature=temperature
         )
 
     def compile(self, *args, **kwargs):
@@ -215,6 +261,7 @@ class AutoencoderModel:
         custom_objs = {
             'ConsistencyLossLayer': ConsistencyLossLayer,
             'CorrelationLossLayer': CorrelationLossLayer,
+            'ProbabilisticFactorLayer': ProbabilisticFactorLayer,
             'MeanSquaredError': MeanSquaredError
         }
         model = load_model(filepath, custom_objects=custom_objs)

@@ -79,6 +79,8 @@ def main():
     # Regularization parameters
     linear_l1 = get_input("Enter linear l1 regularization", float, 1e-5)
     linear_l2 = get_input("Enter linear l2 regularization", float, 1e-3)
+    # Probabilistic factor parameters
+    temperature = get_input("Enter temperature for probabilistic factors (lower=sharper, higher=smoother)", float, 1.0)
     
     # ---------------- Data Preparation ----------------
     df = load_and_preprocess_data(file_name)
@@ -107,7 +109,8 @@ def main():
         lambda1=lambda1,
         lambda2=lambda2,
         linear_l1=linear_l1,
-        linear_l2=linear_l2
+        linear_l2=linear_l2,
+        temperature=temperature
     )
 
     # Create optimizer with deterministic behavior
@@ -169,11 +172,91 @@ def main():
     ae_model.save(model_save_path)
     print(f"Model saved to {model_save_path}")
 
-    linear_layer = ae_model.model.get_layer('linear_output')
-    W = linear_layer.get_weights()[0]
-    weights_save_path = os.path.join(model_dir, "linear_weights.npy")
-    np.save(weights_save_path, W)
-    print(f"Linear weights saved to {weights_save_path}")
+    # Save probabilistic factor profiles (interpretable weights)
+    probabilistic_layer = ae_model.model.get_layer('probabilistic_factors')
+    factor_logits_layer = probabilistic_layer.factor_logits
+    W_logits = factor_logits_layer.get_weights()[0]  # Raw logits weights
+    
+    # Save raw logits weights (for model reconstruction)
+    logits_save_path = os.path.join(model_dir, "factor_logits_weights.npy")
+    np.save(logits_save_path, W_logits)
+    print(f"Factor logits weights saved to {logits_save_path}")
+    
+    # Generate and save probabilistic factor profiles using REAL encoder outputs
+    # This approach uses actual learned latent representations instead of artificial one-hot vectors
+    
+    # Extract the encoder part of the model
+    encoder = tf.keras.Model(
+        inputs=ae_model.model.input,
+        outputs=ae_model.model.get_layer('latent').output,
+        name='encoder'
+    )
+    
+    # Get real latent vectors from training data
+    print("Generating factor profiles using real encoder outputs...")
+    real_latent_vectors = encoder.predict(X_train, verbose=0)
+    print(f"Real latent vectors shape: {real_latent_vectors.shape}")
+    
+    # Find representative samples for each factor
+    # Method 1: Use samples with highest activation for each factor
+    n_factors = n_clusters
+    factor_profiles = []
+    
+    print(f"\nFinding representative samples for {n_factors} factors...")
+    
+    for i in range(n_factors):
+        # Find the sample with highest activation for factor i
+        factor_activations = real_latent_vectors[:, i]
+        best_sample_idx = np.argmax(factor_activations)
+        representative_latent = real_latent_vectors[best_sample_idx:best_sample_idx+1]
+        
+        print(f"Factor {i+1}: Using sample {best_sample_idx} with activation {factor_activations[best_sample_idx]:.4f}")
+        print(f"  Representative latent vector: {representative_latent[0]}")
+        
+        # Get the factor profile for this representative latent vector
+        factor_profile = probabilistic_layer(representative_latent).numpy()
+        factor_profiles.append(factor_profile[0])  # Remove batch dimension
+    
+    # Alternative Method: Create "enhanced one-hot" vectors based on real latent patterns
+    print(f"\nAlternative: Creating enhanced factor profiles...")
+    enhanced_factor_profiles = []
+    
+    for i in range(n_factors):
+        # Create a vector that emphasizes factor i but uses real latent patterns
+        # Take the mean latent vector and enhance factor i
+        mean_latent = np.mean(real_latent_vectors, axis=0)
+        enhanced_latent = mean_latent.copy()
+        enhanced_latent[i] = np.max(real_latent_vectors[:, i])  # Use max activation for this factor
+        
+        # Normalize to maintain realistic proportions
+        enhanced_latent = enhanced_latent / np.sum(enhanced_latent)
+        
+        print(f"Enhanced Factor {i+1}: Enhanced latent vector: {enhanced_latent}")
+        
+        # Get the factor profile for this enhanced latent vector
+        enhanced_factor_profile = probabilistic_layer(enhanced_latent.reshape(1, -1)).numpy()
+        enhanced_factor_profiles.append(enhanced_factor_profile[0])
+    
+    # Use the enhanced method as the primary approach
+    factor_profiles = np.array(enhanced_factor_profiles)
+    
+    # Save probabilistic factor profiles (these are the interpretable ones)
+    factors_save_path = os.path.join(model_dir, "probabilistic_factors.npy")
+    np.save(factors_save_path, factor_profiles)
+    print(f"Probabilistic factor profiles saved to {factors_save_path}")
+    
+    # Print factor profile statistics
+    print(f"\nProbabilistic Factor Profile Statistics:")
+    print(f"  Shape: {factor_profiles.shape}")
+    print(f"  Row sums (should be ~1.0): {np.sum(factor_profiles, axis=1)}")
+    print(f"  Min value: {np.min(factor_profiles):.6f}")
+    print(f"  Max value: {np.max(factor_profiles):.6f}")
+    print(f"  Mean value: {np.mean(factor_profiles):.6f}")
+    
+    # Also save the raw logits weights with the old name for backward compatibility
+    legacy_weights_save_path = os.path.join(model_dir, "linear_weights.npy")
+    np.save(legacy_weights_save_path, W_logits)
+    print(f"Legacy linear weights (logits) saved to {legacy_weights_save_path}")
 
 if __name__ == "__main__":
     main()
