@@ -68,6 +68,18 @@ def ensure_reproducibility():
 def main():
     print("=== Autoencoder Training Script ===\n")
     
+    # ---------------- GPU Diagnostics & Config ----------------
+    try:
+        gpus = tf.config.list_physical_devices('GPU')
+        print(f"Detected GPUs: {gpus}")
+        for gpu in gpus:
+            try:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            except Exception as e:
+                print(f"Warning: could not enable memory growth on {gpu}: {e}")
+    except Exception as e:
+        print(f"GPU query failed: {e}")
+    
     # ---------------- Hyperparameter and File Path Prompts ----------------
     file_name = input("Enter the file name located in the raw data folder [Spectra_Abhin_reduced.csv]: ").strip() or "Spectra_Abhin_reduced.csv"
     epochs = get_input("Enter number of epochs", int, 400)
@@ -103,15 +115,20 @@ def main():
     ensure_reproducibility()
 
     # ---------------- Build and Compile Model ----------------
-    ae_model = AutoencoderModel(
-        n_clusters=n_clusters,
-        input_shape=(input_dim, 1),
-        lambda1=lambda1,
-        lambda2=lambda2,
-        linear_l1=linear_l1,
-        linear_l2=linear_l2,
-        temperature=temperature
-    )
+    # Prefer GPU if available
+    physical_gpus = tf.config.list_physical_devices('GPU')
+    device_scope = '/GPU:0' if physical_gpus else '/CPU:0'
+    print(f"Using device scope: {device_scope}")
+    with tf.device(device_scope):
+        ae_model = AutoencoderModel(
+            n_clusters=n_clusters,
+            input_shape=(input_dim, 1),
+            lambda1=lambda1,
+            lambda2=lambda2,
+            linear_l1=linear_l1,
+            linear_l2=linear_l2,
+            temperature=temperature
+        )
 
     # Create optimizer with deterministic behavior
     optimizer = Adam(learning_rate=learning_rate)
@@ -152,14 +169,15 @@ def main():
     _ = ae_model.model(X_input[:batch_size])
     print("Manual forward pass succeeded.")
 
-    history = ae_model.fit(
-        X_train,
-        {"deep_output": y_train, "linear_output": y_train},
-        epochs=epochs,
-        batch_size=batch_size,
-        validation_data=(X_val, {"deep_output": y_val, "linear_output": y_val}),
-        shuffle=False  # Disable shuffling for reproducibility
-    )
+    with tf.device(device_scope):
+        history = ae_model.fit(
+            X_train,
+            {"deep_output": y_train, "linear_output": y_train},
+            epochs=epochs,
+            batch_size=batch_size,
+            validation_data=(X_val, {"deep_output": y_val, "linear_output": y_val}),
+            shuffle=False  # Disable shuffling for reproducibility
+        )
     
     # ---------------- Plot Training History ----------------
     plot_training_history(history)
