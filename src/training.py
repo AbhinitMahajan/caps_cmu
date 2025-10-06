@@ -93,6 +93,7 @@ def main():
     linear_l2 = get_input("Enter linear l2 regularization", float, 1e-3)
     # Probabilistic factor parameters
     temperature = get_input("Enter temperature for probabilistic factors (lower=sharper, higher=smoother)", float, 1.0)
+    ortho_weight = get_input("Enter orthogonality weight for factor profiles (higher=more diverse factors)", float, 1e-2)
     
     # ---------------- Data Preparation ----------------
     df = load_and_preprocess_data(file_name)
@@ -127,7 +128,8 @@ def main():
             lambda2=lambda2,
             linear_l1=linear_l1,
             linear_l2=linear_l2,
-            temperature=temperature
+            temperature=temperature,
+            ortho_weight=ortho_weight
         )
 
     # Create optimizer with deterministic behavior
