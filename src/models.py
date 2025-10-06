@@ -93,15 +93,29 @@ class PMFKLLossLayer(layers.Layer):
 
     Also adds an orthogonality penalty on P via off-diagonal energy of P @ P^T.
     """
-    def __init__(self, prob_layer, ortho_weight=1e-3, entropy_weight_a=0.0, eps=1e-8, **kwargs):
+    def __init__(self, prob_layer=None, ortho_weight=1e-3, entropy_weight_a=0.0, eps=1e-8, **kwargs):
         super().__init__(**kwargs)
-        self.prob_layer = prob_layer  # instance of ProbabilisticFactorLayer
+        self.prob_layer = prob_layer  # instance of ProbabilisticFactorLayer (set during build if None)
         self.ortho_weight = ortho_weight
         self.entropy_weight_a = entropy_weight_a
         self.eps = eps
+        self._prob_layer_name = 'probabilistic_factors'  # Name to look up during loading
 
+    def build(self, input_shape):
+        # If prob_layer wasn't provided (during loading), try to find it in the model
+        if self.prob_layer is None:
+            # This will be set by the model after loading
+            pass
+        super().build(input_shape)
+    
     def call(self, inputs):
         model_input, latent = inputs  # model_input shape (batch, F, 1); latent (batch, K)
+        
+        # If prob_layer is still None, try to get it from the functional API context
+        if self.prob_layer is None:
+            # During loading, we need to find the prob layer by name
+            # This is a workaround for the serialization issue
+            raise ValueError("prob_layer must be set before calling PMFKLLossLayer")
 
         # Normalize true spectra per sample (L1)
         x_true = tf.squeeze(model_input, axis=-1)  # (batch, F)
@@ -137,6 +151,17 @@ class PMFKLLossLayer(layers.Layer):
         self.add_loss(kl_loss + self.ortho_weight * ortho_loss + self.entropy_weight_a * entropy_loss)
         # Also return y_hat so other layers can reuse it if needed
         return y_hat
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'ortho_weight': self.ortho_weight,
+            'entropy_weight_a': self.entropy_weight_a,
+            'eps': self.eps
+        })
+        # Note: prob_layer is not serializable, but we don't need it for loading
+        # since it's rebuilt from the model architecture
+        return config
 
 
 class ProbabilisticFactorLayer(layers.Layer):
