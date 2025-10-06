@@ -188,7 +188,8 @@ def build_autoencoder(
     lambda2=0.6,
     linear_l1=1e-5,
     linear_l2=1e-3,
-    temperature=1.0
+    temperature=1.0,
+    ortho_weight=1e-3
 ):
     inp = layers.Input(shape=(input_dim, 1), name='AE_Input')
     x = inp
@@ -260,7 +261,7 @@ def build_autoencoder(
     lin_out = prob_layer(latent)
 
     # PMF-style KL reconstruction loss and orthogonality regularization
-    _ = PMFKLLossLayer(prob_layer=prob_layer, ortho_weight=1e-3, name='pmf_kl')([inp, latent])
+    _ = PMFKLLossLayer(prob_layer=prob_layer, ortho_weight=ortho_weight, name='pmf_kl')([inp, latent])
 
     # Attach loss layers
     d_named = IdentityLayer(name='deep_named')(deep_out)
@@ -289,12 +290,14 @@ class AutoencoderModel:
         lambda2,
         linear_l1=1e-5,
         linear_l2=1e-3,
-        temperature=1.0
+        temperature=1.0,
+        ortho_weight=1e-3
     ):
         input_dim = input_shape[0]
         self.model = build_autoencoder(
             n_clusters, input_dim, lambda1=lambda1, lambda2=lambda2,
-            linear_l1=linear_l1, linear_l2=linear_l2, temperature=temperature
+            linear_l1=linear_l1, linear_l2=linear_l2, temperature=temperature,
+            ortho_weight=ortho_weight
         )
 
     def compile(self, *args, **kwargs):
