@@ -94,6 +94,7 @@ def main():
     # Probabilistic factor parameters
     temperature = get_input("Enter temperature for probabilistic factors (lower=sharper, higher=smoother)", float, 1.0)
     ortho_weight = get_input("Enter orthogonality weight for factor profiles (higher=more diverse factors)", float, 1e-2)
+    entropy_weight_a = get_input("Enter entropy weight on contributions a (higher=sharper a)", float, 1e-3)
     
     # ---------------- Data Preparation ----------------
     df = load_and_preprocess_data(file_name)
@@ -129,7 +130,8 @@ def main():
             linear_l1=linear_l1,
             linear_l2=linear_l2,
             temperature=temperature,
-            ortho_weight=ortho_weight
+            ortho_weight=ortho_weight,
+            entropy_weight_a=entropy_weight_a
         )
 
     # Create optimizer with deterministic behavior
@@ -195,69 +197,29 @@ def main():
     # Save probabilistic factor profiles (interpretable weights)
     probabilistic_layer = ae_model.model.get_layer('probabilistic_factors')
     factor_logits_layer = probabilistic_layer.factor_logits
-    W_logits = factor_logits_layer.get_weights()[0]  # Raw logits weights
+    W_logits = factor_logits_layer.get_weights()[0]  # Raw logits weights (K, F)
     
     # Save raw logits weights (for model reconstruction)
     logits_save_path = os.path.join(model_dir, "factor_logits_weights.npy")
     np.save(logits_save_path, W_logits)
     print(f"Factor logits weights saved to {logits_save_path}")
     
-    # Generate and save probabilistic factor profiles using REAL encoder outputs
-    # This approach uses actual learned latent representations instead of artificial one-hot vectors
+    # Generate probabilistic factor profiles directly from kernel
+    # This matches exactly what's used in training (PMFKLLossLayer)
+    print("\nGenerating factor profiles from kernel (same as training)...")
+    print(f"Kernel shape: {W_logits.shape}")  # (K, F)
     
-    # Extract the encoder part of the model
-    encoder = tf.keras.Model(
-        inputs=ae_model.model.input,
-        outputs=ae_model.model.get_layer('latent').output,
-        name='encoder'
-    )
+    # Compute P = softmax(W_logits / temperature) for each factor (row)
+    # This is identical to what PMFKLLossLayer uses during training
+    temperature_val = temperature  # Same temperature used in model
+    logits_scaled = W_logits / temperature_val
     
-    # Get real latent vectors from training data
-    print("Generating factor profiles using real encoder outputs...")
-    real_latent_vectors = encoder.predict(X_train, verbose=0)
-    print(f"Real latent vectors shape: {real_latent_vectors.shape}")
+    # Softmax over features (axis=1) for each factor
+    exp_logits = np.exp(logits_scaled - np.max(logits_scaled, axis=1, keepdims=True))  # Numerical stability
+    factor_profiles = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
     
-    # Find representative samples for each factor (representative-sample method only)
-    n_factors = n_clusters
-    factor_profiles = []
-    
-    print(f"\nFinding representative samples for {n_factors} factors...")
-    
-    for i in range(n_factors):
-        # Find the sample with highest activation for factor i
-        factor_activations = real_latent_vectors[:, i]
-        best_sample_idx = np.argmax(factor_activations)
-        representative_latent = real_latent_vectors[best_sample_idx:best_sample_idx+1]
-        
-        print(f"Factor {i+1}: Using sample {best_sample_idx} with activation {factor_activations[best_sample_idx]:.4f}")
-        print(f"  Representative latent vector: {representative_latent[0]}")
-        
-        # Get the factor profile for this representative latent vector
-        factor_profile = probabilistic_layer(representative_latent).numpy()
-        factor_profiles.append(factor_profile[0])  # Remove batch dimension
-    
-    # Alternative Method: Create "enhanced one-hot" vectors based on real latent patterns
-    print(f"\nAlternative: Creating enhanced factor profiles...")
-    enhanced_factor_profiles = []
-    
-    for i in range(n_factors):
-        # Create a vector that emphasizes factor i but uses real latent patterns
-        # Take the mean latent vector and enhance factor i
-        mean_latent = np.mean(real_latent_vectors, axis=0)
-        enhanced_latent = mean_latent.copy()
-        enhanced_latent[i] = np.max(real_latent_vectors[:, i])  # Use max activation for this factor
-        
-        # Normalize to maintain realistic proportions
-        enhanced_latent = enhanced_latent / np.sum(enhanced_latent)
-        
-        print(f"Enhanced Factor {i+1}: Enhanced latent vector: {enhanced_latent}")
-        
-        # Get the factor profile for this enhanced latent vector
-        enhanced_factor_profile = probabilistic_layer(enhanced_latent.reshape(1, -1)).numpy()
-        enhanced_factor_profiles.append(enhanced_factor_profile[0])
-    
-    # so using the representative-sample method rather than the enhanced method
-    factor_profiles = np.array(factor_profiles)
+    print(f"Factor profiles shape: {factor_profiles.shape}")  # (K, F)
+    print(f"Temperature used: {temperature_val}")
     
     # Save probabilistic factor profiles (these are the interpretable ones)
     factors_save_path = os.path.join(model_dir, "probabilistic_factors.npy")
