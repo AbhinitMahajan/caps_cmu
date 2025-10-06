@@ -195,7 +195,9 @@ def main():
     print(f"Model saved to {model_save_path}")
 
     # Save probabilistic factor profiles (interpretable weights)
-    probabilistic_layer = ae_model.model.get_layer('probabilistic_factors')
+    # Get the PMF KL layer which has reference to prob_layer
+    pmf_kl_layer = ae_model.model.get_layer('pmf_kl')
+    probabilistic_layer = pmf_kl_layer.prob_layer
     factor_logits_layer = probabilistic_layer.factor_logits
     W_logits = factor_logits_layer.get_weights()[0]  # Raw logits weights (K, F)
     
