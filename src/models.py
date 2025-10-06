@@ -93,10 +93,11 @@ class PMFKLLossLayer(layers.Layer):
 
     Also adds an orthogonality penalty on P via off-diagonal energy of P @ P^T.
     """
-    def __init__(self, prob_layer, ortho_weight=1e-3, eps=1e-8, **kwargs):
+    def __init__(self, prob_layer, ortho_weight=1e-3, entropy_weight_a=0.0, eps=1e-8, **kwargs):
         super().__init__(**kwargs)
         self.prob_layer = prob_layer  # instance of ProbabilisticFactorLayer
         self.ortho_weight = ortho_weight
+        self.entropy_weight_a = entropy_weight_a
         self.eps = eps
 
     def call(self, inputs):
@@ -128,8 +129,14 @@ class PMFKLLossLayer(layers.Layer):
         gram_off = gram - tf.linalg.diag(diag)
         ortho_loss = tf.reduce_mean(tf.square(gram_off))
 
-        self.add_loss(kl_loss + self.ortho_weight * ortho_loss)
-        return latent  # pass-through
+        # Entropy sparsity on contributions a (lower entropy -> sharper assignments)
+        a_clipped = tf.clip_by_value(a, self.eps, 1.0)
+        entropy_a = -tf.reduce_sum(a_clipped * tf.math.log(a_clipped), axis=1)
+        entropy_loss = tf.reduce_mean(entropy_a)
+
+        self.add_loss(kl_loss + self.ortho_weight * ortho_loss + self.entropy_weight_a * entropy_loss)
+        # Also return y_hat so other layers can reuse it if needed
+        return y_hat
 
 
 class ProbabilisticFactorLayer(layers.Layer):
@@ -153,7 +160,8 @@ class ProbabilisticFactorLayer(layers.Layer):
             self.n_features,
             activation='linear',
             name='factor_logits',
-            kernel_initializer='glorot_uniform'
+            kernel_initializer='glorot_uniform',
+            use_bias=False  # No bias to keep factor profiles as pure kernel rows
         )
         super().build(input_shape)
         
@@ -189,7 +197,8 @@ def build_autoencoder(
     linear_l1=1e-5,
     linear_l2=1e-3,
     temperature=1.0,
-    ortho_weight=1e-3
+    ortho_weight=1e-3,
+    entropy_weight_a=0.0
 ):
     inp = layers.Input(shape=(input_dim, 1), name='AE_Input')
     x = inp
@@ -260,20 +269,26 @@ def build_autoencoder(
     )
     lin_out = prob_layer(latent)
 
-    # PMF-style KL reconstruction loss and orthogonality regularization
-    _ = PMFKLLossLayer(prob_layer=prob_layer, ortho_weight=ortho_weight, name='pmf_kl')([inp, latent])
+    # PMF-style KL reconstruction loss, orthogonality regularization, and contribution entropy
+    y_linear = PMFKLLossLayer(
+        prob_layer=prob_layer,
+        ortho_weight=ortho_weight,
+        entropy_weight_a=entropy_weight_a,
+        name='pmf_kl'
+    )([inp, latent])
 
     # Attach loss layers
     d_named = IdentityLayer(name='deep_named')(deep_out)
-    l_named = IdentityLayer(name='lin_named')(lin_out)
+    # use y_linear (reconstructed spectrum) for consistency with deep branch
+    ylin_named = IdentityLayer(name='ylin_named')(y_linear)
 
-    d_cons = ConsistencyLossLayer(lambda1, name='consistency')([d_named, l_named])
+    d_cons = ConsistencyLossLayer(lambda1, name='consistency')([d_named, ylin_named])
     d_exp = layers.Lambda(lambda x: tf.expand_dims(x, -1), name='expand_deep')(d_cons)
     d_final = CorrelationLossLayer(lambda2, name='correlation')([inp, d_exp])
 
     return models.Model(
         inputs=inp,
-        outputs={'deep_output': d_final, 'linear_output': l_named},
+        outputs={'deep_output': d_final, 'linear_output': ylin_named},
         name='Autoencoder'
     )
 
@@ -291,13 +306,14 @@ class AutoencoderModel:
         linear_l1=1e-5,
         linear_l2=1e-3,
         temperature=1.0,
-        ortho_weight=1e-3
+        ortho_weight=1e-3,
+        entropy_weight_a=0.0
     ):
         input_dim = input_shape[0]
         self.model = build_autoencoder(
             n_clusters, input_dim, lambda1=lambda1, lambda2=lambda2,
             linear_l1=linear_l1, linear_l2=linear_l2, temperature=temperature,
-            ortho_weight=ortho_weight
+            ortho_weight=ortho_weight, entropy_weight_a=entropy_weight_a
         )
 
     def compile(self, *args, **kwargs):
