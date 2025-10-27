@@ -57,7 +57,7 @@ def run_single_experiment(params, experiment_id, base_output_dir):
     print(f"{'='*80}\n")
     
     # Create experiment-specific directory
-    exp_name = f"factors{params['n_clusters']}_temp{params['temperature']}_ortho{params['ortho_weight']}"
+    exp_name = f"factors{params['n_clusters']}_temp{params['temperature']}_entropy{params['entropy_weight_a']}"
     exp_dir = os.path.join(base_output_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -215,7 +215,7 @@ def main():
     # Parameters to vary
     factor_profiles_list = [3, 4, 5, 6, 7, 8, 9]
     temperature_list = [0.1]
-    ortho_weight_list = [100, 10, 1, 0.1, 0.01, 0.001]
+    entropy_weight_list = [100, 10, 1, 0.1, 0.01, 0.001]
     
     # Default parameters (kept constant)
     default_params = {
@@ -227,24 +227,24 @@ def main():
         'learning_rate': 1e-4,
         'linear_l1': 1e-5,
         'linear_l2': 1e-3,
-        'entropy_weight_a': 1e-3
+        'ortho_weight': 10.0  # Fixed at 10
     }
     
     # Generate all parameter combinations
     experiments = []
     for n_clusters in factor_profiles_list:
         for temperature in temperature_list:
-            for ortho_weight in ortho_weight_list:
+            for entropy_weight in entropy_weight_list:
                 exp_params = default_params.copy()
                 exp_params['n_clusters'] = n_clusters
                 exp_params['temperature'] = temperature
-                exp_params['ortho_weight'] = ortho_weight
+                exp_params['entropy_weight_a'] = entropy_weight
                 experiments.append(exp_params)
     
     print(f"\nTotal number of experiments: {len(experiments)}")
     print(f"  Factor profiles: {factor_profiles_list}")
     print(f"  Temperature: {temperature_list}")
-    print(f"  Orthogonality weights: {ortho_weight_list}")
+    print(f"  Entropy weights: {entropy_weight_list}")
     print(f"\n{'='*80}\n")
     
     # Create base output directory with timestamp
@@ -282,7 +282,7 @@ def main():
     
     # Print summary table
     print("\nExperiment Summary:")
-    print(f"{'ID':<5} {'Factors':<8} {'Temp':<8} {'Ortho':<12} {'Final Loss':<15} {'Status'}")
+    print(f"{'ID':<5} {'Factors':<8} {'Temp':<8} {'Entropy':<12} {'Final Loss':<15} {'Status'}")
     print("-" * 80)
     for result in results:
         exp_id = result['experiment_id']
@@ -293,9 +293,9 @@ def main():
             name_parts = result['experiment_name'].split('_')
             factors = name_parts[0].replace('factors', '')
             temp = name_parts[1].replace('temp', '')
-            ortho = name_parts[2].replace('ortho', '')
+            entropy = name_parts[2].replace('entropy', '')
             loss = f"{result['final_loss']:.6f}"
-            print(f"{exp_id:<5} {factors:<8} {temp:<8} {ortho:<12} {loss:<15} SUCCESS")
+            print(f"{exp_id:<5} {factors:<8} {temp:<8} {entropy:<12} {loss:<15} SUCCESS")
     
     print(f"\n{'='*80}")
     print(f"All probabilistic factors saved in: {base_output_dir}")
