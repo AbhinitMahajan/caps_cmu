@@ -57,7 +57,7 @@ def run_single_experiment(params, experiment_id, base_output_dir):
     print(f"{'='*80}\n")
     
     # Create experiment-specific directory
-    exp_name = f"factors{params['n_clusters']}_temp{params['temperature']}_entropy{params['entropy_weight_a']}"
+    exp_name = f"factors{params['n_clusters']}_temp{params['temperature']}_ortho{params['ortho_weight']}_entropy{params['entropy_weight_a']}"
     exp_dir = os.path.join(base_output_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -167,6 +167,33 @@ def run_single_experiment(params, experiment_id, base_output_dir):
     print(f"  Min: {np.min(factor_profiles):.6f}, Max: {np.max(factor_profiles):.6f}")
     print(f"  Mean: {np.mean(factor_profiles):.6f}")
     
+    # Extract and save factor contributions (G matrix)
+    print("\nExtracting factor contributions...")
+    encoder_model = tf.keras.Model(
+        inputs=ae_model.model.input,
+        outputs=ae_model.model.get_layer('latent').output
+    )
+    
+    # Get latent vectors for the full dataset
+    latent_vectors = encoder_model.predict(X_input, batch_size=params['batch_size'], verbose=0)
+    
+    # Apply softmax to get probabilistic contributions (same as PMFKLLossLayer)
+    contributions = tf.nn.softmax(latent_vectors, axis=-1).numpy()
+    
+    # Save contributions
+    contributions_save_path = os.path.join(exp_dir, "factor_contributions.npy")
+    np.save(contributions_save_path, contributions)
+    print(f"Factor contributions saved to: {contributions_save_path}")
+    
+    # Print contribution statistics
+    print(f"  Shape: {contributions.shape}")
+    print(f"  Mean per factor: {np.mean(contributions, axis=0).round(4)}")
+    
+    # Verify reconstruction
+    reconstruction = contributions @ factor_profiles
+    mse_check = np.mean((X_target - reconstruction) ** 2)
+    print(f"  Reconstruction MSE: {mse_check:.6f}")
+    
     # Save training history
     history_path = os.path.join(exp_dir, "training_history.npz")
     np.savez(history_path, **history.history)
@@ -214,8 +241,11 @@ def main():
     # Define experiment parameters
     # Parameters to vary
     factor_profiles_list = [3, 4, 5, 6, 7, 8, 9]
-    temperature_list = [0.1]
-    entropy_weight_list = [100, 10, 1, 0.1, 0.01, 0.001]
+    
+    # Fixed parameters for this experiment set
+    temperature = 0.1
+    entropy_weight = 0.001  # Fixed at 0.001
+    ortho_weight = 1.0      # Fixed at 1.0
     
     # Default parameters (kept constant)
     default_params = {
@@ -227,24 +257,23 @@ def main():
         'learning_rate': 1e-4,
         'linear_l1': 1e-5,
         'linear_l2': 1e-3,
-        'ortho_weight': 10.0  # Fixed at 10
+        'temperature': temperature,
+        'ortho_weight': ortho_weight,
+        'entropy_weight_a': entropy_weight
     }
     
-    # Generate all parameter combinations
+    # Generate experiments (one for each number of factors)
     experiments = []
     for n_clusters in factor_profiles_list:
-        for temperature in temperature_list:
-            for entropy_weight in entropy_weight_list:
-                exp_params = default_params.copy()
-                exp_params['n_clusters'] = n_clusters
-                exp_params['temperature'] = temperature
-                exp_params['entropy_weight_a'] = entropy_weight
-                experiments.append(exp_params)
+        exp_params = default_params.copy()
+        exp_params['n_clusters'] = n_clusters
+        experiments.append(exp_params)
     
     print(f"\nTotal number of experiments: {len(experiments)}")
     print(f"  Factor profiles: {factor_profiles_list}")
-    print(f"  Temperature: {temperature_list}")
-    print(f"  Entropy weights: {entropy_weight_list}")
+    print(f"  Temperature: {temperature}")
+    print(f"  Entropy weight: {entropy_weight}")
+    print(f"  Orthogonality weight: {ortho_weight}")
     print(f"\n{'='*80}\n")
     
     # Create base output directory with timestamp
@@ -282,25 +311,28 @@ def main():
     
     # Print summary table
     print("\nExperiment Summary:")
-    print(f"{'ID':<5} {'Factors':<8} {'Temp':<8} {'Entropy':<12} {'Final Loss':<15} {'Status'}")
-    print("-" * 80)
+    print(f"{'ID':<5} {'Factors':<8} {'Temp':<8} {'Ortho':<8} {'Entropy':<10} {'Final Loss':<15} {'Status'}")
+    print("-" * 85)
     for result in results:
         exp_id = result['experiment_id']
         if 'error' in result:
-            print(f"{exp_id:<5} {'N/A':<8} {'N/A':<8} {'N/A':<12} {'N/A':<15} FAILED")
+            print(f"{exp_id:<5} {'N/A':<8} {'N/A':<8} {'N/A':<8} {'N/A':<10} {'N/A':<15} FAILED")
         else:
             # Extract parameters from experiment name
+            # Format: factors{N}_temp{T}_ortho{O}_entropy{E}
             name_parts = result['experiment_name'].split('_')
             factors = name_parts[0].replace('factors', '')
             temp = name_parts[1].replace('temp', '')
-            entropy = name_parts[2].replace('entropy', '')
+            ortho = name_parts[2].replace('ortho', '')
+            entropy = name_parts[3].replace('entropy', '')
             loss = f"{result['final_loss']:.6f}"
-            print(f"{exp_id:<5} {factors:<8} {temp:<8} {entropy:<12} {loss:<15} SUCCESS")
+            print(f"{exp_id:<5} {factors:<8} {temp:<8} {ortho:<8} {entropy:<10} {loss:<15} SUCCESS")
     
     print(f"\n{'='*80}")
-    print(f"All probabilistic factors saved in: {base_output_dir}")
+    print(f"All results saved in: {base_output_dir}")
     print(f"Each experiment folder contains:")
     print(f"  - probabilistic_factors.npy (interpretable factor profiles)")
+    print(f"  - factor_contributions.npy (factor contributions matrix)")
     print(f"  - factor_logits_weights.npy (raw logits)")
     print(f"  - autoencoder_model.h5 (trained model)")
     print(f"  - training_history.npz (loss history)")

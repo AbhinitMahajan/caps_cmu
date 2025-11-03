@@ -236,10 +236,54 @@ def main():
     print(f"  Max value: {np.max(factor_profiles):.6f}")
     print(f"  Mean value: {np.mean(factor_profiles):.6f}")
     
+    # ---------------- Extract and Save Contributions ----------------
+    print("\n" + "="*80)
+    print("Extracting factor contributions (G matrix)...")
+    print("="*80)
+    
+    # Create encoder model to extract latent vectors
+    encoder_model = tf.keras.Model(
+        inputs=ae_model.model.input,
+        outputs=ae_model.model.get_layer('latent').output
+    )
+    
+    # Get latent vectors for the full dataset
+    print("Computing latent vectors...")
+    latent_vectors = encoder_model.predict(X_input, batch_size=batch_size, verbose=1)
+    print(f"Latent vectors shape: {latent_vectors.shape}")  # (num_samples, n_clusters)
+    
+    # Apply softmax to get probabilistic contributions (same as PMFKLLossLayer line 131)
+    # This is EXACTLY what the model uses during training for contributions
+    contributions = tf.nn.softmax(latent_vectors, axis=-1).numpy()
+    print(f"Contributions shape: {contributions.shape}")  # (num_samples, n_clusters)
+    
+    # Save contributions
+    contributions_save_path = os.path.join(model_dir, "factor_contributions.npy")
+    np.save(contributions_save_path, contributions)
+    print(f"Factor contributions saved to {contributions_save_path}")
+    
+    
+    # Verify reconstruction matches training
+    print("\nVerifying reconstruction quality...")
+    reconstruction = contributions @ factor_profiles
+    mse_check = np.mean((X_target - reconstruction) ** 2)
+    print(f"  Reconstruction MSE: {mse_check:.6f}")
+    print(f"  (This should be close to final training loss)")
+    
     # Also save the raw logits weights with the old name for backward compatibility
     legacy_weights_save_path = os.path.join(model_dir, "linear_weights.npy")
     np.save(legacy_weights_save_path, W_logits)
-    print(f"Legacy linear weights (logits) saved to {legacy_weights_save_path}")
+    print(f"\nLegacy linear weights (logits) saved to {legacy_weights_save_path}")
+    
+    print("\n" + "="*80)
+    print("Summary of saved files:")
+    print("="*80)
+    print(f"  1. Model: {model_save_path}")
+    print(f"  2. Factor Profiles (F): {factors_save_path}")
+    print(f"  3. Factor Contributions (G): {contributions_save_path}")
+    print(f"  4. Factor Logits: {logits_save_path}")
+    print(f"  5. Legacy weights: {legacy_weights_save_path}")
+    print("="*80)
 
 if __name__ == "__main__":
     main()
