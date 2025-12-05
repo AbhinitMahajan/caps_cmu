@@ -26,11 +26,11 @@ Traditional source separation techniques like Non‑negative Matrix Factorizatio
 The autoencoder architecture includes:
 
 1. **Encoder:**  
-   5 convolutional blocks compress the spectral input into a low‑dimensional latent representation.
+   4 convolutional blocks (32→64→128→256 filters) with residual connections and max pooling, followed by a 512-filter bottleneck, compressing input to a K-dimensional latent space.
 
 2. **Dual‑Branch Decoder:**  
-   - **Deep Branch:** Reconstructs the spectrum using upsampling and skip connections from the encoder.  
-   - **Linear Branch:** Produces PMF-style probabilistic factor profiles via softmax-normalized global factors.
+   - **Deep Branch:** Reconstructs spectrum via upsampling with skip connections from encoder.  
+   - **Probabilistic Branch:** Produces PMF-style factor profiles via temperature-scaled softmax over factor logits.
 
 ### Loss Functions
 - **MSE Loss:** Supervises the deep branch for accurate spectrum reconstruction.  
@@ -71,32 +71,47 @@ saved_models/
 └── probabilistic_factors.npy  # PMF-comparable factor profiles
 ```
 
-### Step 3: Visualize Results
-Open `test.ipynb` to:
+### Step 3: Run Experiments
+```bash
+python run_experiments.py
+```
+Automated parameter sweep across factor counts, orthogonality weights, and entropy weights.
+
+### Step 4: Analyze Results
+```bash
+python analyze_experiments.py    # Factor distinctiveness vs NMF
+python calculate_q_metrics.py    # Q/Qexp fit quality metrics
+```
+
+### Step 5: Visualize Results
+Open `test.ipynb` or use `src/visualisation.py` to:
 - Load `probabilistic_factors.npy` (PMF-style factor profiles)
 - Plot heatmaps and bar charts of factor profiles
-- Compare with NMF profiles using correlation metrics, side-by-side visualizations, and top species analysis
+- Compare with NMF profiles using correlation metrics
 
 ---
 
 ## Project Structure
 ```
-Unsupervised_Learning/
+caps_cmu/
 ├── data/
 │   ├── raw/                # Raw ACSM CSV files
-│   └── processed/          # Normalized data outputs
-├── saved_models/           # autoencoder_model.h5, linear_weights.npy
+│   └── processed/         # Normalized data outputs
+├── saved_models/           # Trained models and factor profiles
+├── experiment_results_*/   # Timestamped experiment outputs
+├── analysis_results_*/     # Analysis outputs (orthogonality, entropy, q_metrics)
 ├── src/
-│   ├── __init__.py
 │   ├── config.py           # Seed settings & paths
 │   ├── data_preprocessing.py
 │   ├── models.py           # Encoder, decoder, autoencoder classes
 │   ├── training.py         # CLI for interactive training
 │   └── visualisation.py    # Plotting utilities
+├── run_experiments.py      # Automated parameter sweep experiments
+├── analyze_experiments.py  # Factor analysis vs NMF comparison
+├── calculate_q_metrics.py  # Q/Qexp metric calculation
 ├── test.ipynb              # Notebook for evaluation & comparison
 ├── requirements.txt
-├── README.md
-└── .gitignore
+└── README.md
 ```
 
 ---
