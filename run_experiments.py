@@ -218,6 +218,130 @@ def run_single_experiment(params, experiment_id, base_output_dir):
     return result
 
 
+def get_factor_profiles_input():
+    """
+    Get factor profiles list from user input.
+    Returns a list of integers.
+    """
+    while True:
+        user_input = input("\nEnter factor profiles (comma-separated, e.g., 3,4,5 or 5,6,7,8): ").strip()
+        if not user_input:
+            print("Error: Please provide at least one factor profile.")
+            continue
+        
+        try:
+            factors = [int(x.strip()) for x in user_input.split(',')]
+            if len(factors) == 0:
+                print("Error: Please provide at least one factor profile.")
+                continue
+            if any(f <= 0 for f in factors):
+                print("Error: Factor profiles must be positive integers.")
+                continue
+            return sorted(set(factors))  # Remove duplicates and sort
+        except ValueError:
+            print("Error: Please enter valid integers separated by commas.")
+            continue
+
+
+def display_parameters(fixed_params, default_params):
+    """
+    Display current fixed and default parameters.
+    """
+    print("\n" + "="*80)
+    print("CURRENT PARAMETERS")
+    print("="*80)
+    
+    print("\nFixed Parameters:")
+    for key, value in fixed_params.items():
+        print(f"  {key}: {value}")
+    
+    print("\nDefault Parameters:")
+    for key, value in default_params.items():
+        print(f"  {key}: {value}")
+    print("="*80)
+
+
+def get_user_parameter_changes(fixed_params, default_params):
+    """
+    Interactive function to get parameter changes from user.
+    Returns updated fixed_params and default_params dictionaries.
+    """
+    fixed_params_updated = fixed_params.copy()
+    default_params_updated = default_params.copy()
+    
+    while True:
+        change_input = input("\nDo you want to change any parameters? (yes/no): ").strip().lower()
+        if change_input not in ['yes', 'y', 'no', 'n']:
+            print("Please enter 'yes' or 'no'.")
+            continue
+        
+        if change_input in ['no', 'n']:
+            break
+        
+        # Show options
+        print("\nWhich parameter would you like to change?")
+        print("\nFixed Parameters:")
+        fixed_keys = list(fixed_params_updated.keys())
+        for i, key in enumerate(fixed_keys, 1):
+            print(f"  {i}. {key} (current: {fixed_params_updated[key]})")
+        
+        print("\nDefault Parameters:")
+        default_keys = list(default_params_updated.keys())
+        for i, key in enumerate(default_keys, len(fixed_keys) + 1):
+            print(f"  {i}. {key} (current: {default_params_updated[key]})")
+        
+        print(f"  {len(fixed_keys) + len(default_keys) + 1}. Done (no more changes)")
+        
+        try:
+            choice = int(input("\nEnter option number: ").strip())
+            
+            if choice == len(fixed_keys) + len(default_keys) + 1:
+                break
+            
+            if 1 <= choice <= len(fixed_keys):
+                # Changing fixed parameter
+                param_key = fixed_keys[choice - 1]
+                current_value = fixed_params_updated[param_key]
+                new_value_str = input(f"Enter new value for {param_key} (current: {current_value}): ").strip()
+                
+                # Try to convert to appropriate type
+                if isinstance(current_value, float):
+                    new_value = float(new_value_str)
+                elif isinstance(current_value, int):
+                    new_value = int(new_value_str)
+                else:
+                    new_value = new_value_str
+                
+                fixed_params_updated[param_key] = new_value
+                print(f"✓ Updated {param_key}: {current_value} -> {new_value}")
+                
+            elif len(fixed_keys) + 1 <= choice <= len(fixed_keys) + len(default_keys):
+                # Changing default parameter
+                param_key = default_keys[choice - len(fixed_keys) - 1]
+                current_value = default_params_updated[param_key]
+                new_value_str = input(f"Enter new value for {param_key} (current: {current_value}): ").strip()
+                
+                # Try to convert to appropriate type
+                if isinstance(current_value, float):
+                    new_value = float(new_value_str)
+                elif isinstance(current_value, int):
+                    new_value = int(new_value_str)
+                else:
+                    new_value = new_value_str
+                
+                default_params_updated[param_key] = new_value
+                print(f"✓ Updated {param_key}: {current_value} -> {new_value}")
+            else:
+                print("Invalid option. Please try again.")
+                
+        except ValueError:
+            print("Error: Please enter a valid number.")
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    return fixed_params_updated, default_params_updated
+
+
 def main():
     """
     Main function to run all experiments.
@@ -238,29 +362,48 @@ def main():
     except Exception as e:
         print(f"GPU query failed: {e}")
     
-    # Define experiment parameters
-    # Parameters to vary
-    factor_profiles_list = [3, 4, 5, 6, 7, 8, 9]
+    # Get factor profiles from user
+    factor_profiles_list = get_factor_profiles_input()
+    print(f"\n✓ Factor profiles selected: {factor_profiles_list}")
     
-    # Fixed parameters for this experiment set
-    temperature = 0.1
-    entropy_weight = 0.001  # Fixed at 0.001
-    ortho_weight = 1.0      # Fixed at 1.0
+    # Define default fixed parameters
+    fixed_params = {
+        'temperature': 0.1,
+        'entropy_weight': 0.001,
+        'ortho_weight': 1.0
+    }
     
-    # Default parameters (kept constant)
+    # Define default parameters (kept constant)
     default_params = {
         'file_name': 'Spectra_Abhin_reduced.csv',
-        'epochs': 400,
+        'epochs': 300,
         'batch_size': 512,
         'lambda1': 0.5,
         'lambda2': 0.6,
         'learning_rate': 1e-4,
         'linear_l1': 1e-5,
         'linear_l2': 1e-3,
-        'temperature': temperature,
-        'ortho_weight': ortho_weight,
-        'entropy_weight_a': entropy_weight
+        'temperature': fixed_params['temperature'],
+        'ortho_weight': fixed_params['ortho_weight'],
+        'entropy_weight_a': fixed_params['entropy_weight']
     }
+    
+    # Display current parameters
+    display_parameters(fixed_params, default_params)
+    
+    # Get user changes
+    fixed_params, default_params = get_user_parameter_changes(fixed_params, default_params)
+    
+    # Update default_params with fixed_params values
+    default_params['temperature'] = fixed_params['temperature']
+    default_params['ortho_weight'] = fixed_params['ortho_weight']
+    default_params['entropy_weight_a'] = fixed_params['entropy_weight']
+    
+    # Display final parameters
+    print("\n" + "="*80)
+    print("FINAL PARAMETERS")
+    print("="*80)
+    display_parameters(fixed_params, default_params)
     
     # Generate experiments (one for each number of factors)
     experiments = []
@@ -269,11 +412,21 @@ def main():
         exp_params['n_clusters'] = n_clusters
         experiments.append(exp_params)
     
-    print(f"\nTotal number of experiments: {len(experiments)}")
+    print(f"\n{'='*80}")
+    print("EXPERIMENT SUMMARY")
+    print("="*80)
+    print(f"Total number of experiments: {len(experiments)}")
     print(f"  Factor profiles: {factor_profiles_list}")
-    print(f"  Temperature: {temperature}")
-    print(f"  Entropy weight: {entropy_weight}")
-    print(f"  Orthogonality weight: {ortho_weight}")
+    print(f"  Temperature: {fixed_params['temperature']}")
+    print(f"  Entropy weight: {fixed_params['entropy_weight']}")
+    print(f"  Orthogonality weight: {fixed_params['ortho_weight']}")
+    
+    # Confirm before proceeding
+    confirm = input("\nProceed with experiments? (yes/no): ").strip().lower()
+    if confirm not in ['yes', 'y']:
+        print("Experiments cancelled.")
+        return
+    
     print(f"\n{'='*80}\n")
     
     # Create base output directory with timestamp
